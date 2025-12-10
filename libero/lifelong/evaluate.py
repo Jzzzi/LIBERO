@@ -162,7 +162,7 @@ def _resize_image_if_needed(image: np.ndarray, target_size: int) -> np.ndarray:
     return np.array(Image.fromarray(image).resize((target_size, target_size)))
 
 
-def _build_agent_obs(env_obs: Dict[str, Any], instruction: str, obs_key_mapping: Dict[str, str], target_size: int) -> Dict[str, Any]:
+def _build_agent_obs(env_obs: Dict[str, Any], instruction: str, obs_key_mapping: Dict[str, str], target_size: int, flip: bool = False) -> Dict[str, Any]:
     agentview_key = obs_key_mapping.get("agentview_rgb", "agentview_image")
     wrist_key = obs_key_mapping.get("eye_in_hand_rgb", "robot0_eye_in_hand_image")
 
@@ -172,13 +172,15 @@ def _build_agent_obs(env_obs: Dict[str, Any], instruction: str, obs_key_mapping:
     }
 
     if agentview_key in env_obs:
-        payload["images"]["image"] = _resize_image_if_needed(
-            env_obs[agentview_key], target_size
-        )
+        img = env_obs[agentview_key]
+        if flip:
+            img = np.flipud(img)
+        payload["images"]["image"] = _resize_image_if_needed(img, target_size)
     if wrist_key in env_obs:
-        payload["images"]["wrist_image"] = _resize_image_if_needed(
-            env_obs[wrist_key], target_size
-        )
+        img = env_obs[wrist_key]
+        if flip:
+            img = np.flipud(img)
+        payload["images"]["wrist_image"] = _resize_image_if_needed(img, target_size)
     return payload
 
 
@@ -222,6 +224,12 @@ def parse_args():
     )
     parser.add_argument(
         "--agent-timeout", type=float, default=10.0, help="Socket timeout in seconds."
+    )
+    parser.add_argument(
+        "--flip-agent-images",
+        action="store_true",
+        default=False,
+        help="Flip images vertically before sending to agent (matches robosuite display orientation).",
     )
     parser.add_argument(
         "--agent-env-num",
@@ -467,6 +475,7 @@ def main():
                                 instruction=task.language,
                                 obs_key_mapping=cfg.data.obs_key_mapping,
                                 target_size=args.camera_size,
+                                flip=args.flip_agent_images,
                             )
                             for k in range(env_num)
                         ]
