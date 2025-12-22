@@ -175,11 +175,13 @@ def _build_agent_obs(env_obs: Dict[str, Any], instruction: str, obs_key_mapping:
         img = env_obs[agentview_key]
         if flip:
             img = np.flipud(img)
+            img = np.fliplr(img)
         payload["images"]["image"] = _resize_image_if_needed(img, target_size)
     if wrist_key in env_obs:
         img = env_obs[wrist_key]
         if flip:
             img = np.flipud(img)
+            img = np.fliplr(img)
         payload["images"]["wrist_image"] = _resize_image_if_needed(img, target_size)
     return payload
 
