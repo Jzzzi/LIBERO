@@ -4,7 +4,7 @@ import os
 import pickle
 import socket
 import struct
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # TODO: find a better way for this?
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -142,7 +142,9 @@ class AgentActionClient:
 
     def infer_actions(self, obs_batch: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         self.connect()
-        _send_message(self.sock, {"obs": obs_batch})
+        if not isinstance(obs_batch, list):
+            obs_batch = [obs_batch]
+        _send_message(self.sock, {"obs": obs_batch, "batch_size": len(obs_batch)})
         response = _recv_message(self.sock)
         if response is None:
             raise RuntimeError("Agent server returned empty response")
@@ -186,7 +188,7 @@ def _build_agent_obs(env_obs: Dict[str, Any], instruction: str, obs_key_mapping:
     return payload
 
 
-def parse_args():
+def parse_args(argv: Optional[List[str]] = None):
     parser = argparse.ArgumentParser(description="Evaluation Script")
     parser.add_argument("--experiment_dir", type=str, default="experiments")
     # for which task suite
@@ -196,7 +198,7 @@ def parse_args():
         required=True,
         choices=["libero_10", "libero_spatial", "libero_object", "libero_goal"],
     )
-    parser.add_argument("--task_id", type=int, required=True)
+    parser.add_argument("--task_id", type=int, required=False, default=0)
     # method detail
     parser.add_argument(
         "--algo",
@@ -227,11 +229,18 @@ def parse_args():
     parser.add_argument(
         "--agent-timeout", type=float, default=10.0, help="Socket timeout in seconds."
     )
-    parser.add_argument(
+    flip_group = parser.add_mutually_exclusive_group()
+    flip_group.add_argument(
         "--flip-agent-images",
+        dest="flip_agent_images",
         action="store_true",
-        default=False,
-        help="Flip images vertically before sending to agent (matches robosuite display orientation).",
+        help="Flip images vertically before sending to agent (default: enabled).",
+    )
+    flip_group.add_argument(
+        "--no-flip-agent-images",
+        dest="flip_agent_images",
+        action="store_false",
+        help="Disable flipping images before sending to agent.",
     )
     parser.add_argument(
         "--agent-env-num",
@@ -248,10 +257,11 @@ def parse_args():
     parser.add_argument(
         "--agent-action-horizon",
         type=int,
-        default=None,
-        help="Use only the first N predicted actions from the agent response (default: use all).",
+        default=1,
+        help="Use only the first N predicted actions from the agent response (default: 1).",
     )
-    args = parser.parse_args()
+    parser.set_defaults(flip_agent_images=True)
+    args = parser.parse_args(argv)
     args.use_agent_server = args.agent_server_host is not None
 
     # Validate arguments
@@ -283,8 +293,7 @@ def parse_args():
     return args
 
 
-def main():
-    args = parse_args()
+def run_evaluation(args: argparse.Namespace) -> Tuple[Dict[str, Any], str]:
     use_agent_server = args.use_agent_server
     agent_client = None
 
@@ -460,8 +469,9 @@ def main():
         wrist_key = cfg.data.obs_key_mapping.get("eye_in_hand_rgb", "robot0_eye_in_hand_image")
 
         num_success = 0
-        for _ in range(5):  # simulate the physics without any actions
+        for _ in range(20):  # simulate the physics without any actions
             env.step(np.zeros((env_num, 7)))
+        obs, _, _, _ = env.step(np.zeros((env_num, 7)))
 
         progress = tqdm(total=cfg.eval.max_steps, desc=f"Eval task {args.task_id}", leave=False)
         with torch.no_grad():
@@ -559,6 +569,12 @@ def main():
     print(test_loss, success_rate)
     if agent_client is not None:
         agent_client.close()
+    return eval_stats, save_folder
+
+
+def main():
+    args = parse_args()
+    run_evaluation(args)
 
 
 if __name__ == "__main__":
